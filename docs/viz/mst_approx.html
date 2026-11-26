@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MST 2-근사 단계별 보기</title>
+<!--
+  MST 2-근사의 세 단계(Prim으로 MST 만들기 → 트리를 두 번 도는 산책 → 이미 방문한 점 건너뛰기)를 보여 준다.
+  좌표는 make_instance("uniform", 12, 15)를 정수로 반올림한 값으로, 최근접 이웃 시각화와 같은 입력이다
+  (그 인스턴스는 최근접 이웃의 약점을 보여 주려고 고른 것이다). 외부 라이브러리 없이 이 파일만 열면 동작한다.
+-->
+<style>
+:root{
+  --text-primary:#1f1e1d;--text-secondary:#5f5e5a;--text-muted:#888780;
+  --bg-neutral:#f1efe8;--border:#d3d1c7;--border-strong:#b4b2a9;--page:#ffffff;--radius:8px;
+  --gray-fill:#f1efe8;--gray-stroke:#888780;--gray-text:#444441;
+  --coral-fill:#faece7;--coral-stroke:#d85a30;--coral-text:#712b13;
+  --purple-fill:#eeedfe;--purple-stroke:#7f77dd;--purple-text:#3c3489;
+  --blue-fill:#e6f1fb;--blue-stroke:#378add;--blue-text:#0c447c;
+  --tab-on:#e6f1fb;--tab-on-text:#0c447c;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --text-primary:#f1efe8;--text-secondary:#b4b2a9;--text-muted:#888780;
+    --bg-neutral:#2c2c2a;--border:#444441;--border-strong:#5f5e5a;--page:#1f1e1d;
+    --gray-fill:#444441;--gray-stroke:#b4b2a9;--gray-text:#f1efe8;
+    --coral-fill:#712b13;--coral-stroke:#f0997b;--coral-text:#faece7;
+    --purple-fill:#3c3489;--purple-stroke:#afa9ec;--purple-text:#eeedfe;
+    --blue-fill:#0c447c;--blue-stroke:#85b7eb;--blue-text:#e6f1fb;
+    --tab-on:#0c447c;--tab-on-text:#e6f1fb;
+  }
+}
+body{margin:0;padding:2rem;background:var(--page);color:var(--text-primary);font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;line-height:1.6}
+main{max-width:740px;margin:0 auto}
+h1{font-size:20px;font-weight:500;margin:0 0 .25rem}
+.lead{font-size:14px;color:var(--text-secondary);margin:0 0 1.25rem}
+button{font:inherit;font-size:13px;padding:6px 12px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:transparent;color:var(--text-primary);cursor:pointer}
+button:hover{background:var(--bg-neutral)}
+.phase{display:flex;gap:6px;margin:0 0 10px;flex-wrap:wrap}
+.phase span{font-size:12px;padding:3px 10px;border-radius:var(--radius);background:var(--bg-neutral);color:var(--text-secondary)}
+.phase span.on{background:var(--tab-on);color:var(--tab-on-text)}
+.wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:640px){.wrap{grid-template-columns:1fr}}
+.metric{background:var(--bg-neutral);border-radius:var(--radius);padding:.6rem .8rem}
+.metric .l{font-size:12px;color:var(--text-secondary)}
+.metric .v{font-size:19px;font-weight:500}
+.node circle{stroke-width:1}
+.gray circle{fill:var(--gray-fill);stroke:var(--gray-stroke)} .gray text{fill:var(--gray-text)}
+.coral circle{fill:var(--coral-fill);stroke:var(--coral-stroke)} .coral text{fill:var(--coral-text)}
+.purple circle{fill:var(--purple-fill);stroke:var(--purple-stroke)} .purple text{fill:var(--purple-text)}
+.blue circle{fill:var(--blue-fill);stroke:var(--blue-stroke)} .blue text{fill:var(--blue-text)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:6px}
+.legend b{display:inline-block;width:16px;height:0;margin-right:4px;vertical-align:3px;border-top:2px solid}
+</style>
+</head>
+<body>
+<main>
+<h1>MST 2-근사 단계별 보기</h1>
+<p class="lead">① Prim으로 최소 신장 트리를 키우고, ② 트리의 모든 간선을 두 번씩 지나는 산책을 한 뒤, ③ 산책에서 이미 방문한 점을 건너뛰어 순회를 만듭니다.</p>
+
+<div class="phase"><span id="ph1">① MST 만들기</span><span id="ph2">② 트리를 두 번 돌기</span><span id="ph3">③ 건너뛰기</span></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 1rem">
+  <button id="prev">이전</button>
+  <button id="next">다음 단계</button>
+  <button id="phaseEnd">이 단계 끝까지</button>
+  <button id="reset">처음부터</button>
+  <button id="opt">최적 경로 겹쳐 보기</button>
+</div>
+
+<div class="wrap">
+  <div>
+    <svg id="svg" viewBox="0 0 340 300" width="340" height="300" role="img" aria-label="점 12개와 MST 2-근사의 단계"></svg>
+    <div class="legend">
+      <span><b style="border-color:#7f77dd"></b>MST 간선</span>
+      <span><b style="border-color:#378add"></b>지금 단계</span>
+      <span><b style="border-color:#d85a30"></b>건너뛴 간선</span>
+      <span><b style="border-color:#1d9e75;border-top-style:dashed"></b>최적 경로</span>
+    </div>
+  </div>
+  <div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="l">MST 길이</div><div class="v" id="mst">-</div></div>
+      <div class="metric"><div class="l">산책 길이 (최대 2·MST)</div><div class="v" id="walk">-</div></div>
+      <div class="metric"><div class="l">순회 길이</div><div class="v" id="tour">-</div></div>
+      <div class="metric"><div class="l">최적 대비</div><div class="v" id="ex">-</div></div>
+    </div>
+    <p id="cap" style="font-size:13px;color:var(--text-secondary);margin:0;line-height:1.6"></p>
+  </div>
+</div>
+</main>
+
+<script>
+const P = [[420,653],[353,748],[516,978],[812,810],[462,589],[113,56],[340,814],[378,469],[501,53],[993,257],[423,709],[658,566]];
+const OPT = [0,10,1,6,2,3,11,9,8,5,7,4];  // held_karp 결과 (tsp/held_karp.py)
+const n = P.length;
+const D = (a, b) => Math.hypot(P[a][0] - P[b][0], P[a][1] - P[b][1]);
+const optLen = OPT.reduce((s, v, i) => s + D(v, OPT[(i + 1) % n]), 0);
+
+// ① Prim: tsp/mst_approx.py의 prim_mst와 같은 규칙 (key가 같으면 번호가 작은 점)
+const parent = Array(n).fill(-1), key = Array(n).fill(Infinity), inTree = Array(n).fill(false);
+const added = [];  // {v, p, d}
+key[0] = 0;
+for (let it = 0; it < n; it++) {
+  let u = -1, best = Infinity;
+  for (let v = 0; v < n; v++) if (!inTree[v] && key[v] < best) { u = v; best = key[v]; }
+  inTree[u] = true; added.push({ v: u, p: parent[u], d: best });
+  for (let v = 0; v < n; v++) if (!inTree[v]) { const d = D(u, v); if (d < key[v]) { key[v] = d; parent[v] = u; } }
+}
+const mstLen = added.reduce((s, a) => s + a.d, 0);
+
+// ② 오일러 산책: 자식은 번호가 작은 것부터 (preorder와 같은 순서)
+const children = Array.from({ length: n }, () => []);
+parent.forEach((p, v) => { if (p !== -1) children[p].push(v); });
+const walk = [0];
+(function dfs(u) { for (const c of children[u]) { walk.push(c); dfs(c); walk.push(u); } })(0);
+
+// ③ 건너뛰기: 산책에서 처음 나오는 점만 남김 = 전위 순회
+const tour = [];
+walk.forEach(v => { if (!tour.includes(v)) tour.push(v); });
+const tourLen = tour.reduce((s, v, i) => s + D(v, tour[(i + 1) % n]), 0);
+const isTreeEdge = (a, b) => parent[a] === b || parent[b] === a;
+
+const S1 = n - 1, S2 = walk.length - 1, S3 = n;  // 각 단계의 걸음 수
+const TOTAL = S1 + S2 + S3;
+let k = 0, showOpt = false;
+
+const X = v => 20 + v * 0.3, Y = v => 285 - v * 0.27;
+const line = (a, b, color, w, dash) =>
+  `<line x1="${X(P[a][0])}" y1="${Y(P[a][1])}" x2="${X(P[b][0])}" y2="${Y(P[b][1])}" stroke="${color}" stroke-width="${w}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round"/>`;
+
+function draw() {
+  const phase = k <= S1 ? 1 : k <= S1 + S2 ? 2 : 3;
+  ['ph1', 'ph2', 'ph3'].forEach((id, i) => document.getElementById(id).classList.toggle('on', i + 1 === phase));
+  let h = '';
+  if (showOpt) OPT.forEach((v, i) => h += line(v, OPT[(i + 1) % n], '#1d9e75', 2, '6 4'));
+  const colors = Array(n).fill('gray');
+  let cap = '', walkLen = null, tLen = null;
+
+  if (phase === 1) {
+    const m = k;  // 트리에 들어간 간선 수
+    for (let i = 1; i <= m; i++) h += line(added[i].v, added[i].p, i === m ? '#378add' : '#7f77dd', 2.5);
+    for (let i = 0; i <= m; i++) colors[added[i].v] = 'purple';
+    colors[0] = 'coral';
+    if (m === 0) cap = '루트 0만 트리에 있습니다. 다음 단계마다 "트리 밖 점 중 트리에 가장 가까운 점"을 하나씩 붙입니다.';
+    else { const a = added[m]; colors[a.v] = 'blue';
+      cap = `점 ${a.v}를 점 ${a.p}에 붙였습니다 (${a.d.toFixed(0)}). 최근접 이웃은 "지금 점"에서 가까운 점을 찾지만, Prim은 "트리 전체"에서 가까운 점을 찾습니다.`; }
+    if (m === S1) cap = `MST 완성: 간선 ${n - 1}개, 길이 ${mstLen.toFixed(0)}. 최적 순회에서 간선 하나를 빼면 신장 트리이므로 MST ≤ 최적입니다.`;
+  } else if (phase === 2) {
+    const w = k - S1;  // 산책한 걸음 수
+    added.slice(1).forEach(a => h += line(a.v, a.p, '#7f77dd', 1.5, '2 3'));
+    for (let i = 0; i < w; i++) h += line(walk[i], walk[i + 1], i === w - 1 ? '#378add' : '#7f77dd', 2.5);
+    walkLen = 0; for (let i = 0; i < w; i++) walkLen += D(walk[i], walk[i + 1]);
+    const seen = new Set(walk.slice(0, w + 1));
+    seen.forEach(v => colors[v] = 'purple'); colors[0] = 'coral'; colors[walk[w]] = 'blue';
+    const now = walk[w], revisit = walk.slice(0, w).includes(now);
+    cap = w === 0 ? '루트에서 출발해 트리를 깊이 우선으로 돕니다. 자식이 끝나면 부모로 되돌아오므로 모든 간선을 두 번 지납니다.'
+      : `${walk[w - 1]} → ${now}${revisit ? ' (이미 방문한 점으로 되돌아옴)' : ''}. 산책 ${w} / ${S2}걸음.`;
+    if (w === S2) cap = `산책 완료: 간선 ${n - 1}개를 두 번씩, 길이 ${walkLen.toFixed(0)} = 2 × MST. 이 산책은 같은 점을 여러 번 지나므로 아직 순회가 아닙니다.`;
+  } else {
+    const t = k - S1 - S2;  // 순회 간선 수
+    added.slice(1).forEach(a => h += line(a.v, a.p, '#7f77dd', 1.5, '2 3'));
+    for (let i = 0; i < t; i++) {
+      const a = tour[i], b = tour[(i + 1) % n];
+      h += line(a, b, isTreeEdge(a, b) ? '#7f77dd' : '#d85a30', 2.5);
+    }
+    walkLen = 2 * mstLen;
+    tLen = 0; for (let i = 0; i < t; i++) tLen += D(tour[i], tour[(i + 1) % n]);
+    for (let i = 0; i <= Math.min(t, n - 1); i++) colors[tour[i]] = 'purple';
+    colors[0] = 'coral';
+    if (t < n) colors[tour[t]] = 'blue';
+    const shortcuts = tour.filter((v, i) => !isTreeEdge(v, tour[(i + 1) % n])).length;
+    if (t === 0) cap = '산책 순서에서 이미 나온 점을 지우면 0→' + tour.slice(1).join('→') + '이 남습니다 (전위 순회). 지운 구간은 직선으로 바로 갑니다.';
+    else if (t < n) { const a = tour[t - 1], b = tour[t];
+      cap = isTreeEdge(a, b) ? `${a} → ${b}: 트리 간선 그대로입니다.`
+        : `${a} → ${b}: 산책에서 ${a}부터 ${b}까지 트리를 따라 돌아가던 구간을 직선 하나로 건너뜁니다. 삼각 부등식 때문에 직선이 더 길 수 없습니다.`; }
+    else cap = `완성: 순회 길이 ${tLen.toFixed(0)} ≤ 2·MST ${walkLen.toFixed(0)} ≤ 2·최적. 건너뛴 간선 ${shortcuts}개. 보장은 지켰지만 최적 ${optLen.toFixed(0)}보다 ${((tLen / optLen - 1) * 100).toFixed(1)}% 깁니다. 같은 입력에서 최근접 이웃은 +21.3%였습니다.`;
+  }
+  P.forEach((p, i) => {
+    h += `<g class="node ${colors[i]}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="11"/><text x="${X(p[0])}" y="${Y(p[1])}" text-anchor="middle" dominant-baseline="central" style="font-size:11px;font-weight:500">${i}</text></g>`;
+  });
+  document.getElementById('svg').innerHTML = h;
+  document.getElementById('mst').textContent = k >= S1 ? mstLen.toFixed(0) : '-';
+  document.getElementById('walk').textContent = walkLen === null ? '-' : walkLen.toFixed(0);
+  document.getElementById('tour').textContent = tLen === null ? '-' : tLen.toFixed(0);
+  document.getElementById('ex').textContent = k === TOTAL ? `+${((tourLen / optLen - 1) * 100).toFixed(1)}%` : '-';
+  document.getElementById('cap').textContent = cap;
+}
+document.getElementById('next').onclick = () => { if (k < TOTAL) { k++; draw(); } };
+document.getElementById('prev').onclick = () => { if (k > 0) { k--; draw(); } };
+document.getElementById('phaseEnd').onclick = () => { k = k < S1 ? S1 : k < S1 + S2 ? S1 + S2 : TOTAL; draw(); };
+document.getElementById('reset').onclick = () => { k = 0; draw(); };
+document.getElementById('opt').onclick = e => { showOpt = !showOpt; e.target.textContent = showOpt ? '최적 경로 숨기기' : '최적 경로 겹쳐 보기'; draw(); };
+draw();
+</script>
+</body>
+</html>

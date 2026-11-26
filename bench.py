@@ -4,17 +4,19 @@
     py bench.py small      실험 A: n = 8~14, Held-Karp 최적값 대비 → results/small.csv
     py bench.py large      실험 B: n = 100~2000, MST 대비 비율·격자 초과율 → results/large.csv (약 6~10분)
     py bench.py tsplib     실험 C: TSPLIB 5개, 알려진 최적값 대비 → results/tsplib.csv
+    py bench.py start      실험 D: 최근접 이웃·2-opt 시작점 민감도 → results/start_sensitivity.csv (병렬 실행)
 
 실험마다 원자료(<name>.csv)와 요약(<name>_summary.csv)을 저장한다.
 n이 3개 이상인 실험은 log-log 기울기(<name>_slopes.csv)도 저장한다.
-실험 D는 이후 이슈에서 이 스크립트에 추가한다.
 모든 실험은 results/environment.json에 측정 환경을 함께 남긴다.
 """
 
 import argparse
 import math
+import os
 import statistics
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from tsp.bench import measure_many, write_csv, write_environment
@@ -22,6 +24,7 @@ from tsp.common import tour_length, tsplib_distance
 from tsp.held_karp import held_karp
 from tsp.instances import grid_optimum, make_instance
 from tsp.mst_approx import mst_length
+from tsp.start_sensitivity import run_instance, sample_starts, summarize_instance
 from tsp.tsplib import INSTANCES as TSPLIB_INSTANCES, load_tsplib
 
 RESULTS = Path(__file__).resolve().parent / "results"
@@ -222,8 +225,95 @@ def tsplib(reps: int) -> Path:
     return save(tsplib_rows(reps), "tsplib", slopes=False)
 
 
+START_FIELDS = ["group", "kind", "n", "instance", "metric", "variant", "start", "length", "quality"]
+START_SUMMARY_FIELDS = ["group", "kind", "n", "instance", "metric", "variant", "starts", "min", "median",
+                        "max", "range", "start0", "start0_rank", "corr_nn_two_opt"]
+START_SAMPLE = 20  # 큰 n에서 쓰는 시작점 수 (점 0 포함)
+
+
+def start_tasks(small_sizes=(8, 10, 12, 14), large_sizes=LARGE_SIZES, instances: int = 10,
+                tsplib_names=TSPLIB_INSTANCES) -> list[tuple]:
+    """실험 D 작업 목록: (group, kind, n, instance)."""
+    tasks = [("small", kind, n, i) for kind in ("uniform", "clustered", "grid")
+             for n in small_sizes for i in range(instances)]
+    tasks += [("tsplib", "tsplib", None, name) for name in tsplib_names]
+    tasks += [("large", kind, n, i) for kind in ("uniform", "clustered", "grid")
+              for n in large_sizes for i in range(instances)]
+    return tasks
+
+
+def start_task(task: tuple) -> tuple[list[dict], list[dict]]:
+    """실험 D 작업 하나: (원자료 행, 요약 행). 여러 프로세스에서 부를 수 있게 최상위 함수로 둔다."""
+    group, kind, n, instance = task
+    dist, optimum, mst, with_two_opt = None, None, None, True
+    if group == "tsplib":
+        inst = load_tsplib(instance)
+        points, n, optimum, dist = inst.points, len(inst.points), inst.optimum, tsplib_distance
+        starts = list(range(n))
+    else:
+        points = make_instance(kind, n, instance)
+        if kind == "grid":
+            optimum = grid_optimum(n)
+        elif n <= 14:
+            optimum = tour_length(points, held_karp(points))
+        else:
+            mst = mst_length(points)
+        starts = sample_starts(n, START_SAMPLE if group == "large" else n, f"starts-{kind}-{n}-{instance}")
+        with_two_opt = n <= TWO_OPT_MAX_N
+    kwargs = {"dist": dist} if dist else {}
+    rows = run_instance(points, starts, optimum=optimum, mst=mst, with_two_opt=with_two_opt, **kwargs)
+    meta = {"group": group, "kind": kind, "n": n, "instance": instance,
+            "metric": "excess_pct" if optimum else "mst_ratio"}
+    return [{**meta, **r} for r in rows], [{**meta, **s} for s in summarize_instance(rows)]
+
+
+def start_rows(tasks, workers: int | None = None, verbose: bool = True) -> tuple[list[dict], list[dict]]:
+    """작업을 실행해 (원자료, 인스턴스별 요약)을 모은다. 시간을 재지 않으므로 병렬로 돌린다."""
+    raw, summary = [], []
+    if workers == 1:
+        results = map(start_task, tasks)
+    else:
+        pool = ProcessPoolExecutor(max_workers=workers or max(1, (os.cpu_count() or 2) - 2))
+        results = pool.map(start_task, tasks)
+    try:
+        for done, (r, s) in enumerate(results, 1):
+            raw += r
+            summary += s
+            if verbose and (done % 20 == 0 or done == len(tasks)):
+                print(f"start: {done}/{len(tasks)} 작업 완료", flush=True)
+    finally:
+        if workers != 1:
+            pool.shutdown()
+    return raw, summary
+
+
+def print_start_summary(summary: list[dict]) -> None:
+    """(group, kind, n, variant)별 평균 중앙값·평균 범위, TSPLIB는 인스턴스별로 출력."""
+    groups = {}
+    for s in summary:
+        key = (s["group"], s["kind"], s["n"], s["variant"]) if s["group"] != "tsplib" else             (s["group"], s["instance"], s["n"], s["variant"])
+        groups.setdefault(key, []).append(s)
+    print(f"{'group':7s} {'kind':9s} {'n':>5s} {'variant':14s} {'median':>8s} {'range':>8s} {'start0 rank':>12s}")
+    for (group, kind, n, variant), ss in groups.items():
+        unit = "%" if ss[0]["metric"] == "excess_pct" else "x"
+        rank = statistics.median(s["start0_rank"] for s in ss)
+        print(f"{group:7s} {kind:9s} {n:5d} {variant:14s} {statistics.mean(s['median'] for s in ss):7.2f}{unit} "
+              f"{statistics.mean(s['range'] for s in ss):7.2f}{unit} {rank:6.1f}/{ss[0]['starts']}")
+
+
+def start(reps: int) -> Path:
+    """실험 D: 최근접 이웃·2-opt의 시작점 민감도. reps는 쓰지 않는다 (시간을 재지 않음)."""
+    raw, summary = start_rows(start_tasks())
+    path = RESULTS / "start_sensitivity.csv"
+    write_csv(raw, path, START_FIELDS)
+    write_csv(summary, RESULTS / "start_sensitivity_summary.csv", START_SUMMARY_FIELDS)
+    print_start_summary(summary)
+    return path
+
+
 # 이름 → (함수, 기본 반복 횟수)
-EXPERIMENTS = {"smoke": (smoke, 3), "small": (small, 5), "large": (large, 5), "tsplib": (tsplib, 5)}
+EXPERIMENTS = {"smoke": (smoke, 3), "small": (small, 5), "large": (large, 5), "tsplib": (tsplib, 5),
+               "start": (start, 1)}
 
 
 def main(argv=None) -> int:

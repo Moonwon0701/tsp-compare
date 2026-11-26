@@ -2,6 +2,7 @@
 
 측정 규칙 (명세 4장 "거리 계산 횟수의 정의"):
     - 실행 시간: 세지 않는 거리 함수로 reps번 돌려 중앙값을 쓴다. 측정 중에는 가비지 컬렉터를 끈다.
+      같은 입력의 여러 알고리즘은 번갈아 가며 잰다 (measure_many).
     - 거리 계산 횟수: 시간을 재지 않는 별도 실행 한 번에서 CountingDistance로 센다.
       알고리즘이 결정적이므로 한 번이면 충분하고, 세는 오버헤드가 시간에 섞이지 않는다.
     - 경로 길이: 시간 측정 구간 밖에서, 세지 않는 거리 함수로 계산한다.
@@ -34,55 +35,72 @@ STAT_FIELDS = ("passes", "improvements", "checks")
 
 
 def measure(name: str, points, reps: int = 5, dist=euclidean, length_dist=None, **options) -> dict:
-    """알고리즘 name을 points에 돌려 측정 결과를 돌려준다.
+    """알고리즘 하나를 측정한다. measure_many([name])과 같다.
+
+    options는 알고리즘에 그대로 넘긴다 (예: start, root, initial).
+    """
+    return measure_many([name], points, reps, dist, length_dist, {name: options})[name]
+
+
+def measure_many(names, points, reps: int = 5, dist=euclidean, length_dist=None,
+                 options: dict | None = None) -> dict:
+    """여러 알고리즘을 같은 입력에서 측정한다. 실행 시간은 알고리즘을 번갈아 가며 잰다.
+
+    한 알고리즘을 reps번 연달아 재면, 측정 도중 컴퓨터가 느려졌을 때 그 알고리즘만 불리해진다.
+    그래서 reps 라운드 동안 매 라운드 모든 알고리즘을 한 번씩 돌리고, 라운드마다 시작 알고리즘을
+    한 칸씩 돌린다 (예: nn→mst→two_opt, mst→two_opt→nn, two_opt→nn→mst, …).
 
     dist는 알고리즘이 쓰는 거리, length_dist는 결과 길이를 잴 거리(기본 dist와 같음)이다.
-    options는 알고리즘에 그대로 넘긴다 (예: start, root, initial).
+    options는 {알고리즘 이름: 넘길 인자} 사전이다.
 
-    반환: tour, length, time_ms(중앙값), time_min_ms, dist_calls, reps, 2-opt면 passes·improvements·checks
+    반환: {이름: {tour, length, time_ms(중앙값), time_min_ms, dist_calls, reps, (2-opt) passes·improvements·checks}}
     """
     if reps < 1:
         raise ValueError("reps는 1 이상이어야 합니다")
-    solve, solve_with_stats = ALGORITHMS[name]
+    names = list(names)
+    options = options or {}
     length_dist = length_dist or dist
 
-    # 1) 거리 계산 횟수 (시간을 재지 않는 실행)
-    counter = CountingDistance(dist)
-    stats = {}
-    if solve_with_stats is not None:
-        tour, stats = solve_with_stats(points, counter, **options)
-    else:
-        tour = solve(points, counter, **options)
-    validate_tour(tour, len(points))
+    # 1) 거리 계산 횟수 (시간을 재지 않는 실행, 알고리즘마다 한 번)
+    results = {}
+    for name in names:
+        solve, solve_with_stats = ALGORITHMS[name]
+        opts = options.get(name, {})
+        counter = CountingDistance(dist)
+        stats = {}
+        if solve_with_stats is not None:
+            tour, stats = solve_with_stats(points, counter, **opts)
+        else:
+            tour = solve(points, counter, **opts)
+        validate_tour(tour, len(points))
+        results[name] = {"tour": tour, "dist_calls": counter.count, "times": [], **stats}
 
-    # 2) 실행 시간 (세지 않는 거리, reps번 중앙값)
-    times = []
+    # 2) 실행 시간 (세지 않는 거리, 알고리즘을 번갈아 reps 라운드)
     gc_was_enabled = gc.isenabled()
     gc.disable()
     try:
-        for _ in range(reps):
-            start = time.perf_counter()
-            timed_tour = solve(points, dist, **options)
-            times.append((time.perf_counter() - start) * 1000)
-            if timed_tour != tour:
-                raise AssertionError(f"{name}: 실행마다 경로가 다릅니다 (결정적이어야 함)")
+        for round_no in range(reps):
+            shift = round_no % len(names)
+            for name in names[shift:] + names[:shift]:
+                solve = ALGORITHMS[name][0]
+                start = time.perf_counter()
+                timed_tour = solve(points, dist, **options.get(name, {}))
+                elapsed = (time.perf_counter() - start) * 1000
+                if timed_tour != results[name]["tour"]:
+                    raise AssertionError(f"{name}: 실행마다 경로가 다릅니다 (결정적이어야 함)")
+                results[name]["times"].append(elapsed)
     finally:
         if gc_was_enabled:
             gc.enable()
 
     # 3) 경로 길이 (측정 구간 밖)
-    result = {
-        "tour": tour,
-        "length": tour_length(points, tour, length_dist),
-        "time_ms": statistics.median(times),
-        "time_min_ms": min(times),
-        "dist_calls": counter.count,
-        "reps": reps,
-    }
-    for field in STAT_FIELDS:
-        if field in stats:
-            result[field] = stats[field]
-    return result
+    for name, r in results.items():
+        times = r.pop("times")
+        r["length"] = tour_length(points, r["tour"], length_dist)
+        r["time_ms"] = statistics.median(times)
+        r["time_min_ms"] = min(times)
+        r["reps"] = reps
+    return results
 
 
 def environment() -> dict:

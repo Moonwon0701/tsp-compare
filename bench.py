@@ -13,7 +13,7 @@ import statistics
 import sys
 from pathlib import Path
 
-from tsp.bench import measure, write_csv, write_environment
+from tsp.bench import measure_many, write_csv, write_environment
 from tsp.common import tour_length
 from tsp.held_karp import held_karp
 from tsp.instances import grid_optimum, make_instance
@@ -44,7 +44,7 @@ def run_cases(experiment: str, kinds, sizes, instances: int, reps: int, algorith
         for n in sizes:
             for index in range(instances):
                 points = make_instance(kind, n, index)
-                results = {algo: measure(algo, points, reps=reps) for algo in algorithms}
+                results = measure_many(algorithms, points, reps=reps)
                 optimum = results["held_karp"]["length"] if "held_karp" in results else None
                 if kind == "grid":
                     if optimum is not None and abs(optimum - n) > 1e-6:

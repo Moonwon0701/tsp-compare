@@ -64,6 +64,40 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(set(ALGORITHMS), {"nn", "mst", "two_opt", "held_karp"})
 
 
+class InterleaveTest(unittest.TestCase):
+    def test_timed_runs_are_interleaved_and_rotated(self):
+        from unittest import mock
+
+        from tsp.common import CountingDistance
+
+        calls = []
+
+        def fake(name):
+            def solve(points, dist, **_):
+                if not isinstance(dist, CountingDistance):  # 시간 측정 실행만 기록
+                    calls.append(name)
+                return list(range(len(points)))
+            return solve
+
+        fakes = {k: (fake(k), None) for k in ("a", "b", "c")}
+        with mock.patch.dict("tsp.bench.ALGORITHMS", fakes):
+            from tsp.bench import measure_many
+            measure_many(["a", "b", "c"], make_instance("uniform", 5), reps=4)
+        self.assertEqual(calls, list("abc" "bca" "cab" "abc"))
+
+    def test_same_results_as_single_measure(self):
+        pts = make_instance("clustered", 60)
+        from tsp.bench import measure_many
+        many = measure_many(["nn", "mst", "two_opt"], pts, reps=2, options={"nn": {"start": 4}})
+        for name, opts in (("nn", {"start": 4}), ("mst", {}), ("two_opt", {})):
+            with self.subTest(name=name):
+                single = measure(name, pts, reps=1, **opts)
+                for key in ("tour", "length", "dist_calls"):
+                    self.assertEqual(many[name][key], single[key])
+                self.assertEqual(many[name]["reps"], 2)
+        self.assertEqual(many["two_opt"]["checks"], measure("two_opt", pts, reps=1)["checks"])
+
+
 class OutputTest(unittest.TestCase):
     def test_write_csv_roundtrip(self):
         rows = [{"a": 1, "b": 0.5, "extra": "x"}, {"a": 2}]

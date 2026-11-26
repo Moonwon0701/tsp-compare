@@ -1,0 +1,10 @@
+kind,algorithm,n_min,n_max,points,time_slope,calls_slope
+uniform,nn,100,2000,5,1.931609,2.003060
+uniform,mst,100,2000,5,1.943060,2.003060
+uniform,two_opt,100,1000,4,2.175121,2.172662
+clustered,nn,100,2000,5,1.890228,2.003060
+clustered,mst,100,2000,5,1.900487,2.003060
+clustered,two_opt,100,1000,4,2.063971,2.160727
+grid,nn,100,2000,5,1.861985,2.003060
+grid,mst,100,2000,5,1.856329,2.003060
+grid,two_opt,100,1000,4,2.020648,2.178842

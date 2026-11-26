@@ -2,13 +2,16 @@
 
     py bench.py smoke      작은 설정으로 러너가 동작하는지 확인 → results/smoke.csv
     py bench.py small      실험 A: n = 8~14, Held-Karp 최적값 대비 → results/small.csv
+    py bench.py large      실험 B: n = 100~2000, MST 대비 비율·격자 초과율 → results/large.csv (약 10분)
 
 실험마다 원자료(<name>.csv)와 요약(<name>_summary.csv)을 저장한다.
-실험 B·C·D는 이후 이슈에서 이 스크립트에 추가한다.
+n이 3개 이상인 실험은 log-log 기울기(<name>_slopes.csv)도 저장한다.
+실험 C·D는 이후 이슈에서 이 스크립트에 추가한다.
 모든 실험은 results/environment.json에 측정 환경을 함께 남긴다.
 """
 
 import argparse
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -104,14 +107,52 @@ def print_summary(summary: list[dict]) -> None:
               f"{s['mean_mst_ratio']:9.3f} {s['median_time_ms']:10.2f} {s['median_dist_calls']:12,.0f}")
 
 
+def loglog_slopes(summary: list[dict]) -> list[dict]:
+    """(유형, 알고리즘)별로 log(시간)·log(거리 계산)을 log(n)에 최소제곱으로 맞춘 기울기.
+
+    n이 3개 이상인 조합만 계산한다. 이론 차수(O(n²)이면 2)와 비교하는 용도이다.
+    """
+    groups = {}
+    for s in summary:
+        groups.setdefault((s["kind"], s["algorithm"]), []).append(s)
+    out = []
+    for (kind, algo), ss in groups.items():
+        if len(ss) < 3:
+            continue
+        xs = [math.log(s["n"]) for s in ss]
+        row = {"kind": kind, "algorithm": algo, "n_min": min(s["n"] for s in ss),
+               "n_max": max(s["n"] for s in ss), "points": len(ss)}
+        for key, col in (("median_time_ms", "time_slope"), ("median_dist_calls", "calls_slope")):
+            row[col] = _slope(xs, [math.log(s[key]) for s in ss])
+        out.append(row)
+    return out
+
+
+def _slope(xs, ys) -> float:
+    mx, my = statistics.mean(xs), statistics.mean(ys)
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+
+
+SLOPE_FIELDS = ["kind", "algorithm", "n_min", "n_max", "points", "time_slope", "calls_slope"]
+
+
 def save(rows: list[dict], name: str, verbose: bool = True) -> Path:
-    """results/<name>.csv(원자료)와 results/<name>_summary.csv(요약)를 저장한다."""
+    """results/<name>.csv(원자료)와 results/<name>_summary.csv(요약)를 저장한다.
+
+    n이 3개 이상이면 log-log 기울기도 results/<name>_slopes.csv로 저장한다.
+    """
     path = RESULTS / f"{name}.csv"
     write_csv(rows, path, FIELDS)
     summary = summarize(rows)
     write_csv(summary, RESULTS / f"{name}_summary.csv", SUMMARY_FIELDS)
+    slopes = loglog_slopes(summary)
+    if slopes:
+        write_csv(slopes, RESULTS / f"{name}_slopes.csv", SLOPE_FIELDS)
     if verbose:
         print_summary(summary)
+        for s in slopes:
+            print(f"slope {s['kind']:9s} {s['algorithm']:9s} n={s['n_min']}~{s['n_max']}: "
+                  f"time {s['time_slope']:.2f}, calls {s['calls_slope']:.2f}")
     return path
 
 
@@ -127,8 +168,28 @@ def small(reps: int, sizes=(8, 10, 12, 14), instances: int = 10, verbose: bool =
     return save(rows, "small", verbose)
 
 
+LARGE_SIZES = (100, 200, 500, 1000, 2000)
+TWO_OPT_MAX_N = 1000  # 명세 5장: 2-opt는 우선 n ≤ 1000
+
+
+def large_rows(reps: int, sizes=LARGE_SIZES, instances: int = 10, two_opt_max: int = TWO_OPT_MAX_N,
+               verbose: bool = True) -> list[dict]:
+    """실험 B의 원자료 행. 무작위·군집형은 MST 대비 비율, 격자는 최적값(n) 대비 초과율로 본다."""
+    rows = []
+    for n in sizes:
+        algorithms = APPROX if n <= two_opt_max else tuple(a for a in APPROX if a != "two_opt")
+        rows += run_cases("large", ("uniform", "clustered", "grid"), (n,), instances, reps,
+                          algorithms=algorithms, verbose=verbose)
+    return rows
+
+
+def large(reps: int) -> Path:
+    """실험 B: n = 100~2000에서 세 방식 비교 (2-opt는 n ≤ 1000)."""
+    return save(large_rows(reps), "large")
+
+
 # 이름 → (함수, 기본 반복 횟수)
-EXPERIMENTS = {"smoke": (smoke, 3), "small": (small, 5)}
+EXPERIMENTS = {"smoke": (smoke, 3), "small": (small, 5), "large": (large, 5)}
 
 
 def main(argv=None) -> int:

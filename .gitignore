@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 results/smoke.csv
 results/smoke_summary.csv
+results/smoke_slopes.csv

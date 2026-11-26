@@ -64,6 +64,35 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(set(ALGORITHMS), {"nn", "mst", "two_opt", "held_karp"})
 
 
+class LargeExperimentTest(unittest.TestCase):
+    def test_large_rows_limit_two_opt_and_use_right_reference(self):
+        import bench
+        rows = bench.large_rows(reps=1, sizes=(16, 20), instances=1, two_opt_max=16, verbose=False)
+        algos = {(r["kind"], r["n"]): set() for r in rows}
+        for r in rows:
+            algos[(r["kind"], r["n"])].add(r["algorithm"])
+            if r["kind"] == "grid":
+                self.assertEqual(r["optimum"], r["n"])  # 격자는 최적값 대비
+            else:
+                self.assertIsNone(r["optimum"])  # n > 14 무작위·군집형은 최적값 없음
+                self.assertIsNone(r.get("excess_pct"))
+            self.assertGreaterEqual(r["mst_ratio"], 1 - 1e-9)
+        for kind in ("uniform", "clustered", "grid"):
+            self.assertEqual(algos[(kind, 16)], {"nn", "mst", "two_opt"})
+            self.assertEqual(algos[(kind, 20)], {"nn", "mst"})  # two_opt_max 초과
+
+    def test_loglog_slopes(self):
+        import bench
+        summary = [{"kind": "k", "algorithm": "a", "n": n, "median_time_ms": 0.001 * n ** 2,
+                    "median_dist_calls": n * (n - 1) / 2} for n in (100, 200, 400)]
+        summary.append({"kind": "k", "algorithm": "b", "n": 100, "median_time_ms": 1, "median_dist_calls": 1})
+        slopes = bench.loglog_slopes(summary)
+        self.assertEqual(len(slopes), 1)  # n이 하나뿐인 b는 제외
+        self.assertAlmostEqual(slopes[0]["time_slope"], 2.0, places=9)
+        # n(n−1)/2는 작은 n에서 n²보다 살짝 가파르다 (100~400에서 약 2.005)
+        self.assertAlmostEqual(slopes[0]["calls_slope"], 2.0, delta=0.01)
+
+
 class InterleaveTest(unittest.TestCase):
     def test_timed_runs_are_interleaved_and_rotated(self):
         from unittest import mock

@@ -16,10 +16,20 @@ from .common import Point, euclidean
 MAX_N = 16  # 이보다 크면 Python에서 너무 오래 걸리고 메모리도 많이 쓴다
 
 
-def held_karp(points: list[Point], dist=euclidean) -> tuple[list[int], float]:
-    """최적 순회 (방문 순서, 길이)를 돌려준다. 방문 순서는 점 0에서 시작한다.
+def held_karp(points: list[Point], dist=euclidean) -> list[int]:
+    """최적 순회의 방문 순서를 돌려준다. 방문 순서는 점 0에서 시작한다.
+
+    다른 알고리즘과 같이 경로만 돌려준다. 길이는 호출한 쪽에서 tour_length로 계산한다
+    (측정용 거리 계산이 경로 탐색 비용에 섞이지 않게 하기 위해서).
+    """
+    return held_karp_solve(points, dist)[0]
+
+
+def held_karp_solve(points: list[Point], dist=euclidean) -> tuple[list[int], float]:
+    """최적 순회 (방문 순서, DP가 구한 최적 길이)를 돌려준다.
 
     거리는 점 쌍마다 한 번씩, 총 n(n−1)/2번 계산해 표에 저장한 뒤 재사용한다.
+    길이는 DP 표에서 바로 나오므로 거리를 더 계산하지 않는다.
     """
     n = len(points)
     if n > MAX_N:

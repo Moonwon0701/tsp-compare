@@ -2,7 +2,7 @@ import itertools
 import unittest
 
 from tsp.common import CountingDistance, is_valid_tour, tour_length, tsplib_distance
-from tsp.held_karp import MAX_N, held_karp
+from tsp.held_karp import MAX_N, held_karp, held_karp_solve
 from tsp.instances import make_instance
 
 
@@ -22,48 +22,57 @@ class HeldKarpTest(unittest.TestCase):
                 for index in range(3):
                     with self.subTest(kind=kind, n=n, index=index):
                         pts = make_instance(kind, n, index)
-                        tour, length = held_karp(pts)
-                        self.assertAlmostEqual(length, brute_force(pts), places=9)
+                        tour = held_karp(pts)
+                        self.assertAlmostEqual(tour_length(pts, tour), brute_force(pts), places=9)
 
-    def test_tour_is_valid_and_length_consistent(self):
+    def test_returns_tour_only(self):
+        tour = held_karp(make_instance("uniform", 6))
+        self.assertIsInstance(tour, list)
+        self.assertTrue(is_valid_tour(tour, 6))
+
+    def test_tour_is_valid_and_dp_length_consistent(self):
         for n in (4, 8, 12):
             with self.subTest(n=n):
                 pts = make_instance("uniform", n)
-                tour, length = held_karp(pts)
+                tour, length = held_karp_solve(pts)
                 self.assertTrue(is_valid_tour(tour, n))
                 self.assertEqual(tour[0], 0)
+                self.assertEqual(held_karp(pts), tour)
                 self.assertAlmostEqual(tour_length(pts, tour), length, places=9)
 
     def test_grid_optimum_is_n(self):
         for n in (8, 10, 12):
             with self.subTest(n=n):
-                tour, length = held_karp(make_instance("grid", n))
-                self.assertAlmostEqual(length, n, places=9)
+                pts = make_instance("grid", n)
+                self.assertAlmostEqual(tour_length(pts, held_karp(pts)), n, places=9)
 
     def test_tiny_inputs(self):
-        self.assertEqual(held_karp([]), ([], 0.0))
-        self.assertEqual(held_karp([(3, 3)]), ([0], 0.0))
-        tour, length = held_karp([(0, 0), (3, 4)])
+        self.assertEqual(held_karp_solve([]), ([], 0.0))
+        self.assertEqual(held_karp_solve([(3, 3)]), ([0], 0.0))
+        tour, length = held_karp_solve([(0, 0), (3, 4)])
         self.assertEqual(tour, [0, 1])
         self.assertAlmostEqual(length, 10)
-        tour, length = held_karp([(0, 0), (3, 0), (3, 4)])
+        tour, length = held_karp_solve([(0, 0), (3, 0), (3, 4)])
         self.assertTrue(is_valid_tour(tour, 3))
         self.assertAlmostEqual(length, 12)
 
     def test_duplicate_points(self):
         pts = [(0, 0), (0, 0), (1, 0), (1, 0)]
-        tour, length = held_karp(pts)
+        tour, length = held_karp_solve(pts)
         self.assertTrue(is_valid_tour(tour, 4))
         self.assertAlmostEqual(length, 2)
 
-    def test_counts_each_pair_once(self):
-        d = CountingDistance()
-        held_karp(make_instance("uniform", 10), d)
-        self.assertEqual(d.count, 10 * 9 // 2)
+    def test_counts_only_search_distances(self):
+        # 거리표를 만드는 n(n−1)/2번뿐. 길이는 DP에서 나오므로 더 세지 않는다
+        for solver in (held_karp, held_karp_solve):
+            with self.subTest(solver=solver.__name__):
+                d = CountingDistance()
+                solver(make_instance("uniform", 10), d)
+                self.assertEqual(d.count, 10 * 9 // 2)
 
     def test_works_with_tsplib_distance(self):
         pts = make_instance("uniform", 8)
-        tour, length = held_karp(pts, tsplib_distance)
+        tour, length = held_karp_solve(pts, tsplib_distance)
         self.assertEqual(length, tour_length(pts, tour, tsplib_distance))
 
     def test_rejects_large_n(self):

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>최근접 이웃 단계별 보기</title>
+<!--
+  최근접 이웃이 한 단계씩 경로를 만드는 과정을 보여 준다.
+  좌표는 make_instance("uniform", 12, 15)를 정수로 반올림한 값이다 (tsp/instances.py).
+  uniform n=12 인스턴스 20개 중 최적 대비 초과율이 가장 큰 것(약 21%, 중앙값은 약 7%)을
+  약점을 보여 주려고 골랐다. 외부 라이브러리 없이 이 파일만 열면 동작한다.
+-->
+<style>
+:root{
+  --text-primary:#1f1e1d;--text-secondary:#5f5e5a;--text-muted:#888780;
+  --bg-neutral:#f1efe8;--border:#d3d1c7;--border-strong:#b4b2a9;
+  --page:#ffffff;--radius:8px;
+  --gray-fill:#f1efe8;--gray-stroke:#888780;--gray-text:#444441;
+  --coral-fill:#faece7;--coral-stroke:#d85a30;--coral-text:#712b13;
+  --purple-fill:#eeedfe;--purple-stroke:#7f77dd;--purple-text:#3c3489;
+  --blue-fill:#e6f1fb;--blue-stroke:#378add;--blue-text:#0c447c;
+  --scan:#b4b2a9;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --text-primary:#f1efe8;--text-secondary:#b4b2a9;--text-muted:#888780;
+    --bg-neutral:#2c2c2a;--border:#444441;--border-strong:#5f5e5a;
+    --page:#1f1e1d;
+    --gray-fill:#444441;--gray-stroke:#b4b2a9;--gray-text:#f1efe8;
+    --coral-fill:#712b13;--coral-stroke:#f0997b;--coral-text:#faece7;
+    --purple-fill:#3c3489;--purple-stroke:#afa9ec;--purple-text:#eeedfe;
+    --blue-fill:#0c447c;--blue-stroke:#85b7eb;--blue-text:#e6f1fb;
+    --scan:#5f5e5a;
+  }
+}
+body{margin:0;padding:2rem;background:var(--page);color:var(--text-primary);font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;line-height:1.6}
+main{max-width:720px;margin:0 auto}
+h1{font-size:20px;font-weight:500;margin:0 0 .25rem}
+.lead{font-size:14px;color:var(--text-secondary);margin:0 0 1.25rem}
+button{font:inherit;font-size:13px;padding:6px 12px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:transparent;color:var(--text-primary);cursor:pointer}
+button:hover{background:var(--bg-neutral)}
+.wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:640px){.wrap{grid-template-columns:1fr}}
+.metric{background:var(--bg-neutral);border-radius:var(--radius);padding:.6rem .8rem}
+.metric .l{font-size:12px;color:var(--text-secondary)}
+.metric .v{font-size:20px;font-weight:500}
+.node circle{stroke-width:1}
+.gray circle{fill:var(--gray-fill);stroke:var(--gray-stroke)} .gray text{fill:var(--gray-text)}
+.coral circle{fill:var(--coral-fill);stroke:var(--coral-stroke)} .coral text{fill:var(--coral-text)}
+.purple circle{fill:var(--purple-fill);stroke:var(--purple-stroke)} .purple text{fill:var(--purple-text)}
+.blue circle{fill:var(--blue-fill);stroke:var(--blue-stroke)} .blue text{fill:var(--blue-text)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px;border:1px solid}
+.legend b{display:inline-block;width:16px;height:0;margin-right:4px;vertical-align:3px;border-top:2px solid}
+</style>
+</head>
+<body>
+<main>
+<h1>최근접 이웃 단계별 보기</h1>
+<p class="lead">지금 점에서 아직 방문하지 않은 모든 점까지 거리를 재고(회색 점선), 가장 가까운 점(파란 선)으로 이동합니다. 끝까지 가면 시작점으로 돌아오는 간선을 붙입니다.</p>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 1rem">
+  <button id="next">다음 단계</button>
+  <button id="all">끝까지</button>
+  <button id="reset">처음부터</button>
+  <button id="opt">최적 경로 겹쳐 보기</button>
+</div>
+
+<div class="wrap">
+  <div>
+    <svg id="svg" viewBox="0 0 340 300" width="340" height="300" role="img" aria-label="점 12개와 최근접 이웃이 만든 경로"></svg>
+    <div class="legend">
+      <span><i style="background:var(--coral-fill);border-color:var(--coral-stroke)"></i>시작점</span>
+      <span><i style="background:var(--blue-fill);border-color:var(--blue-stroke)"></i>현재 점</span>
+      <span><i style="background:var(--purple-fill);border-color:var(--purple-stroke)"></i>방문한 점</span>
+      <span><b style="border-color:#d85a30"></b>돌아오는 간선</span>
+      <span><b style="border-color:#1d9e75;border-top-style:dashed"></b>최적 경로</span>
+    </div>
+  </div>
+  <div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="l">이동 횟수</div><div class="v" id="step">0 / 12</div></div>
+      <div class="metric"><div class="l">누적 거리 계산</div><div class="v" id="calls">0</div></div>
+      <div class="metric"><div class="l">지금까지 길이</div><div class="v" id="len">0</div></div>
+      <div class="metric"><div class="l">최적 대비</div><div class="v" id="ex">-</div></div>
+    </div>
+    <p id="cap" style="font-size:13px;color:var(--text-secondary);margin:0;line-height:1.6"></p>
+  </div>
+</div>
+</main>
+
+<script>
+const P = [[420,653],[353,748],[516,978],[812,810],[462,589],[113,56],[340,814],[378,469],[501,53],[993,257],[423,709],[658,566]];
+const OPT = [0,10,1,6,2,3,11,9,8,5,7,4];  // held_karp 결과 (tsp/held_karp.py)
+const n = P.length;
+const D = (a, b) => Math.hypot(P[a][0] - P[b][0], P[a][1] - P[b][1]);
+const optLen = OPT.reduce((s, v, i) => s + D(v, OPT[(i + 1) % n]), 0);
+
+// 최근접 이웃: tsp/nearest_neighbor.py와 같은 규칙 (거리가 같으면 번호가 작은 점)
+const steps = [];
+(function build() {
+  const unv = [...Array(n).keys()].slice(1);
+  let cur = 0, len = 0, calls = 0;
+  const tour = [0];
+  while (unv.length) {
+    let bp = 0, bd = D(cur, unv[0]);
+    for (let p = 1; p < unv.length; p++) { const d = D(cur, unv[p]); if (d < bd) { bp = p; bd = d; } }
+    calls += unv.length;
+    steps.push({ from: cur, scanned: [...unv], to: unv[bp], d: bd });
+    cur = unv.splice(bp, 1)[0]; tour.push(cur); len += bd;
+  }
+  steps.push({ from: cur, scanned: [0], to: 0, d: D(cur, 0), closing: true });
+})();
+
+const X = v => 20 + v * 0.3, Y = v => 285 - v * 0.27;
+let k = 0, showOpt = false;
+
+function draw() {
+  const svg = document.getElementById('svg');
+  let h = '';
+  if (showOpt) OPT.forEach((v, i) => { const a = P[v], b = P[OPT[(i + 1) % n]];
+    h += `<line x1="${X(a[0])}" y1="${Y(a[1])}" x2="${X(b[0])}" y2="${Y(b[1])}" stroke="#1d9e75" stroke-width="2" stroke-dasharray="6 4"/>`; });
+  const cur = k < steps.length ? steps[k] : null;
+  if (cur && !cur.closing) cur.scanned.forEach(t => { if (t === cur.to) return; const a = P[cur.from], b = P[t];
+    h += `<line x1="${X(a[0])}" y1="${Y(a[1])}" x2="${X(b[0])}" y2="${Y(b[1])}" stroke="var(--scan)" stroke-width="1" stroke-dasharray="3 3"/>`; });
+  const visited = new Set([0]);
+  for (let i = 0; i < k; i++) { const s = steps[i], a = P[s.from], b = P[s.to]; visited.add(s.to);
+    h += `<line x1="${X(a[0])}" y1="${Y(a[1])}" x2="${X(b[0])}" y2="${Y(b[1])}" stroke="${s.closing ? '#d85a30' : '#7f77dd'}" stroke-width="2.5"/>`; }
+  if (cur) { const a = P[cur.from], b = P[cur.to];
+    h += `<line x1="${X(a[0])}" y1="${Y(a[1])}" x2="${X(b[0])}" y2="${Y(b[1])}" stroke="${cur.closing ? '#d85a30' : '#378add'}" stroke-width="2.5" stroke-dasharray="${cur.closing ? '6 4' : ''}"/>`; }
+  P.forEach((p, i) => {
+    const isCur = cur ? i === cur.from : false;
+    const cls = isCur ? 'blue' : i === 0 ? 'coral' : visited.has(i) ? 'purple' : 'gray';
+    h += `<g class="node ${cls}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="11"/><text x="${X(p[0])}" y="${Y(p[1])}" text-anchor="middle" dominant-baseline="central" style="font-size:11px;font-weight:500">${i}</text></g>`;
+  });
+  svg.innerHTML = h;
+
+  let len = 0, calls = 0;
+  for (let i = 0; i < k; i++) { len += steps[i].d; calls += steps[i].scanned.length; }
+  document.getElementById('step').textContent = `${Math.min(k, n)} / ${n}`;
+  document.getElementById('calls').textContent = calls;
+  document.getElementById('len').textContent = len.toFixed(0);
+  document.getElementById('ex').textContent = k === steps.length ? `+${((len / optLen - 1) * 100).toFixed(1)}%` : '-';
+  const cap = document.getElementById('cap');
+  if (k === steps.length) {
+    const top = steps.map((s, i) => ({ s, i })).sort((a, b) => b.s.d - a.s.d).slice(0, 2).sort((a, b) => a.i - b.i);
+    const desc = top.map(t => `${t.s.from}→${t.s.to}(${t.s.d.toFixed(0)}, ${t.i + 1}번째)`).join('과 ');
+    cap.textContent = `완성: 길이 ${len.toFixed(0)}, 최적 ${optLen.toFixed(0)}. 가장 긴 두 간선은 ${desc}로 모두 끝부분에 나옵니다. 앞에서 가까운 점만 골라 가다 보니, 남겨 둔 먼 점과 돌아오는 거리를 마지막에 한꺼번에 치렀습니다.`;
+  }
+  else if (cur.closing) cap.textContent = `모든 점을 방문했습니다. 이제 점 ${cur.from}에서 시작점 0으로 돌아가야 하는데, 이 간선은 고를 수 없는 마지막 비용입니다 (${cur.d.toFixed(0)}).`;
+  else cap.textContent = `점 ${cur.from}에서 남은 ${cur.scanned.length}개 점까지 거리를 모두 쟀고, 가장 가까운 점 ${cur.to}(${cur.d.toFixed(0)})로 갑니다. 지금 가장 가까운 점이 나중에 좋은 선택인지는 보지 않습니다.`;
+}
+document.getElementById('next').onclick = () => { if (k < steps.length) { k++; draw(); } };
+document.getElementById('all').onclick = () => { k = steps.length; draw(); };
+document.getElementById('reset').onclick = () => { k = 0; draw(); };
+document.getElementById('opt').onclick = e => { showOpt = !showOpt; e.target.textContent = showOpt ? '최적 경로 숨기기' : '최적 경로 겹쳐 보기'; draw(); };
+draw();
+</script>
+</body>
+</html>

@@ -477,3 +477,32 @@
 - 이슈 #17의 제목과 할 일을 2-opt까지 넓혔다. 결과 파일은 `results/start_sensitivity.csv`이다.
 - 그래프 이슈 #12의 실험 D 항목도 함께 고쳤다.
 - 이슈 #7(2-opt)의 코드·테스트·시각화와 명세 수정을 커밋하고 main에 푸시했다. `Closes #7`로 이슈를 닫고 체크리스트를 완료로 표시했다.
+- 이어서 이슈 #8을 진행했다. 시각화는 사용자 요청에 따라 이번부터 만들지 않는다.
+- `tsp/bench.py`에 벤치마크 러너를 구현했다.
+  - `measure(name, points, reps, dist, length_dist, **options)`는 세 단계로 잰다.
+    1. 시간을 재지 않는 실행 한 번에서 거리 계산 횟수를 센다. 2-opt면 바퀴·교체·검사 수도 기록한다.
+    2. 세지 않는 거리로 reps번 실행해 시간의 중앙값과 최솟값을 기록한다. 측정 중에는 GC를 끄고, 매번 같은 경로가 나오는지 확인한다.
+    3. 측정 구간 밖에서 경로 길이를 계산한다. TSPLIB는 반올림 거리를 쓸 수 있다.
+  - `ALGORITHMS`에 nn, mst, two_opt, held_karp를 등록했다.
+  - `environment()`와 `write_environment()`로 Python 버전, OS, CPU, 코어 수를 기록한다. 공개 저장소용이라 사용자 이름이 담긴 실행 파일 경로는 뺐다.
+  - `write_csv()`를 만들었다.
+- 루트 `bench.py` CLI를 만들었다. `py bench.py smoke`가 작은 설정(세 유형 × n = 12, 100 × 인스턴스 2개)을 `results/smoke.csv`에 쓴다.
+  - 행마다 길이, 최적값·초과율(작은 n은 Held-Karp, 격자는 n), MST 길이·비율, 시간, 거리 계산 횟수, 2-opt 통계가 들어간다.
+  - `results/smoke.csv`는 확인용이라 .gitignore에 넣었다.
+- `tests/test_bench.py`에 unittest 11개를 추가했다.
+  - 필드와 값, 거리 계산 횟수에 길이 계산이 빠졌는지(nn·mst = n(n−1)/2, 2-opt 공식)
+  - 옵션 전달(start, initial), TSPLIB 길이 거리, Held-Karp 등록
+  - 잘못된 입력, CSV 왕복, 환경 정보, run_cases 결과 행
+- `py -m unittest`로 전체 117개가 통과했다. `py bench.py smoke --reps 3`으로 CSV 36행과 environment.json이 생성되는 것을 확인했다.
+- 확인 중 발견한 점: n = 8 인스턴스 0에서는 세 유형 모두 최근접 이웃과 MST 2-근사의 경로가 같았다(n = 12부터는 다르다). 작은 n에서 우연히 일치한 것으로 보인다.
+- 커밋과 이슈 닫기는 사용자 확인 뒤에 하기로 했다.
+
+## #22 · 2026-11-27 · 이슈 #8 마무리, 이슈 #9 실험 A
+
+**요청 (전문)**
+
+> 코드 검토 했는데 문제 없는 것 같아. 다음 이슈 진행하자.
+
+**응답 및 처리 (요약)**
+
+- 검토 완료로 보고 이슈 #8의 러너·CLI·테스트·환경 기록을 커밋하고 main에 푸시했다. `Closes #8`로 이슈를 닫고 체크리스트를 완료로 표시했다.

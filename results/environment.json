@@ -1,0 +1,8 @@
+{
+  "python": "3.12.10",
+  "implementation": "CPython",
+  "os": "Windows-11-10.0.26200-SP0",
+  "machine": "AMD64",
+  "processor": "Intel64 Family 6 Model 198 Stepping 2, GenuineIntel",
+  "cpu_count": 24
+}

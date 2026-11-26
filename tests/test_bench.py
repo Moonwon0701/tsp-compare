@@ -94,6 +94,31 @@ class SmokeRunTest(unittest.TestCase):
             self.assertGreaterEqual(row["excess_pct"], -1e-9)  # 작은 n·격자는 최적값이 있다
             self.assertGreaterEqual(row["mst_ratio"], 1 - 1e-9)
 
+    def test_experiment_a_rows_use_held_karp_as_optimum(self):
+        import bench
+        rows = bench.run_cases("t", ("uniform", "grid"), (8, 10), instances=2, reps=1,
+                               algorithms=("held_karp",) + bench.APPROX, verbose=False)
+        self.assertEqual(len(rows), 2 * 2 * 2 * 4)
+        for row in rows:
+            if row["algorithm"] == "held_karp":
+                self.assertAlmostEqual(row["excess_pct"], 0, places=7)
+            else:
+                self.assertGreaterEqual(row["excess_pct"], -1e-7)
+            if row["kind"] == "grid":
+                self.assertEqual(row["optimum"], row["n"])
+
+    def test_summarize(self):
+        import bench
+        rows = bench.run_cases("t", ("uniform",), (8,), instances=3, reps=1,
+                               algorithms=("held_karp", "nn"), verbose=False)
+        summary = {s["algorithm"]: s for s in bench.summarize(rows)}
+        self.assertEqual(summary["held_karp"]["optimal_hits"], 3)
+        self.assertEqual(summary["held_karp"]["instances"], 3)
+        nn_rows = [r for r in rows if r["algorithm"] == "nn"]
+        self.assertAlmostEqual(summary["nn"]["mean_excess_pct"],
+                               sum(r["excess_pct"] for r in nn_rows) / 3)
+        self.assertEqual(summary["nn"]["max_excess_pct"], max(r["excess_pct"] for r in nn_rows))
+
 
 if __name__ == "__main__":
     unittest.main()

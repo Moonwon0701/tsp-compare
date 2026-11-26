@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .venv/
 results/smoke.csv
+results/smoke_summary.csv

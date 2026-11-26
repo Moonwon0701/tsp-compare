@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2-opt 단계별 보기</title>
+<!--
+  최근접 이웃 경로에서 출발한 2-opt가 간선 두 개를 바꾸며 경로를 줄이는 과정을 보여 준다.
+  좌표는 make_instance("uniform", 12, 15)를 정수로 반올림한 값으로, 최근접 이웃·MST 2-근사 시각화와 같은 입력이다.
+  교체 순서는 tsp/two_opt.py와 같은 규칙(first improvement, 끝까지 훑기)으로 계산한다.
+  외부 라이브러리 없이 이 파일만 열면 동작한다.
+-->
+<style>
+:root{
+  --text-primary:#1f1e1d;--text-secondary:#5f5e5a;--text-muted:#888780;
+  --bg-neutral:#f1efe8;--border:#d3d1c7;--border-strong:#b4b2a9;--page:#ffffff;--radius:8px;
+  --gray-fill:#f1efe8;--gray-stroke:#888780;--gray-text:#444441;
+  --coral-fill:#faece7;--coral-stroke:#d85a30;--coral-text:#712b13;
+  --purple-fill:#eeedfe;--purple-stroke:#7f77dd;--purple-text:#3c3489;
+  --amber-fill:#faeeda;--amber-stroke:#ba7517;--amber-text:#633806;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --text-primary:#f1efe8;--text-secondary:#b4b2a9;--text-muted:#888780;
+    --bg-neutral:#2c2c2a;--border:#444441;--border-strong:#5f5e5a;--page:#1f1e1d;
+    --gray-fill:#444441;--gray-stroke:#b4b2a9;--gray-text:#f1efe8;
+    --coral-fill:#712b13;--coral-stroke:#f0997b;--coral-text:#faece7;
+    --purple-fill:#3c3489;--purple-stroke:#afa9ec;--purple-text:#eeedfe;
+    --amber-fill:#633806;--amber-stroke:#ef9f27;--amber-text:#faeeda;
+  }
+}
+body{margin:0;padding:2rem;background:var(--page);color:var(--text-primary);font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;line-height:1.6}
+main{max-width:740px;margin:0 auto}
+h1{font-size:20px;font-weight:500;margin:0 0 .25rem}
+.lead{font-size:14px;color:var(--text-secondary);margin:0 0 1.25rem}
+button{font:inherit;font-size:13px;padding:6px 12px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:transparent;color:var(--text-primary);cursor:pointer}
+button:hover{background:var(--bg-neutral)}
+.wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:640px){.wrap{grid-template-columns:1fr}}
+.metric{background:var(--bg-neutral);border-radius:var(--radius);padding:.6rem .8rem}
+.metric .l{font-size:12px;color:var(--text-secondary)}
+.metric .v{font-size:19px;font-weight:500}
+.node circle{stroke-width:1}
+.gray circle{fill:var(--gray-fill);stroke:var(--gray-stroke)} .gray text{fill:var(--gray-text)}
+.coral circle{fill:var(--coral-fill);stroke:var(--coral-stroke)} .coral text{fill:var(--coral-text)}
+.purple circle{fill:var(--purple-fill);stroke:var(--purple-stroke)} .purple text{fill:var(--purple-text)}
+.amber circle{fill:var(--amber-fill);stroke:var(--amber-stroke)} .amber text{fill:var(--amber-text)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:6px}
+.legend b{display:inline-block;width:16px;height:0;margin-right:4px;vertical-align:3px;border-top:2px solid}
+</style>
+</head>
+<body>
+<main>
+<h1>2-opt 단계별 보기</h1>
+<p class="lead">경로에서 간선 두 개 (a, b), (c, d)를 빼고 (a, c), (b, d)를 넣었을 때 짧아지면 바꿉니다. b부터 c까지 구간의 방향이 뒤집힙니다. 최근접 이웃 경로에서 출발해, 한 바퀴를 다 훑어도 바꿀 쌍이 없을 때 멈춥니다.</p>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 1rem">
+  <button id="prev">이전</button>
+  <button id="next">다음 교체</button>
+  <button id="all">끝까지</button>
+  <button id="reset">처음부터</button>
+  <button id="opt">최적 경로 겹쳐 보기</button>
+</div>
+
+<div class="wrap">
+  <div>
+    <svg id="svg" viewBox="0 0 340 300" width="340" height="300" role="img" aria-label="점 12개와 2-opt 교체 과정"></svg>
+    <div class="legend">
+      <span><b style="border-color:#7f77dd"></b>현재 경로</span>
+      <span><b style="border-color:#e24b4a;border-top-style:dashed"></b>뺄 간선</span>
+      <span><b style="border-color:#1d9e75"></b>넣을 간선</span>
+      <span><b style="border-color:#888780;border-top-style:dotted"></b>최적 경로</span>
+    </div>
+  </div>
+  <div>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:12px">
+      <div class="metric"><div class="l">교체 횟수</div><div class="v" id="step">0</div></div>
+      <div class="metric"><div class="l">누적 검사한 쌍</div><div class="v" id="checks">0</div></div>
+      <div class="metric"><div class="l">경로 길이</div><div class="v" id="len">-</div></div>
+      <div class="metric"><div class="l">최적 대비</div><div class="v" id="ex">-</div></div>
+    </div>
+    <p id="cap" style="font-size:13px;color:var(--text-secondary);margin:0;line-height:1.6"></p>
+  </div>
+</div>
+</main>
+
+<script>
+const P = [[420,653],[353,748],[516,978],[812,810],[462,589],[113,56],[340,814],[378,469],[501,53],[993,257],[423,709],[658,566]];
+const OPT = [0,10,1,6,2,3,11,9,8,5,7,4];  // held_karp 결과 (tsp/held_karp.py)
+const n = P.length;
+const D = (a, b) => Math.hypot(P[a][0] - P[b][0], P[a][1] - P[b][1]);
+const len = t => t.reduce((s, v, i) => s + D(v, t[(i + 1) % n]), 0);
+const optLen = len(OPT);
+
+// 초기 경로: 점 0에서 시작한 최근접 이웃 (tsp/nearest_neighbor.py와 같은 규칙)
+const nn = (() => { const u = [...Array(n).keys()].slice(1), t = [0]; let c = 0;
+  while (u.length) { let bp = 0, bd = D(c, u[0]); for (let p = 1; p < u.length; p++) { const d = D(c, u[p]); if (d < bd) { bp = p; bd = d; } }
+    c = u.splice(bp, 1)[0]; t.push(c); } return t; })();
+
+// 2-opt: tsp/two_opt.py와 같은 순서로 훑으며 교체 기록
+const frames = [{ tour: [...nn], checks: 0 }];
+let passes = 0, checks = 0;
+(() => { const t = [...nn]; let improved = true;
+  while (improved) { improved = false; passes++;
+    for (let i = 0; i < n - 2; i++) {
+      const jEnd = i > 0 ? n : n - 1;
+      for (let j = i + 2; j < jEnd; j++) {
+        checks++;
+        const a = t[i], b = t[i + 1], c = t[j], d = t[(j + 1) % n];
+        const delta = D(a, c) + D(b, d) - D(a, b) - D(c, d);
+        if (delta < -1e-9) {
+          frames.push({ tour: [...t], checks, move: { a, b, c, d, delta }, pass: passes, before: true });
+          const seg = t.slice(i + 1, j + 1).reverse(); t.splice(i + 1, j - i, ...seg);
+          frames.push({ tour: [...t], checks, move: { a, b, c, d, delta }, pass: passes });
+          improved = true;
+        }
+      }
+    }
+  }
+  frames.push({ tour: [...t], checks, done: true });
+})();
+
+const X = v => 20 + v * 0.3, Y = v => 285 - v * 0.27;
+const line = (a, b, color, w, dash) =>
+  `<line x1="${X(P[a][0])}" y1="${Y(P[a][1])}" x2="${X(P[b][0])}" y2="${Y(P[b][1])}" stroke="${color}" stroke-width="${w}" ${dash ? `stroke-dasharray="${dash}"` : ''} stroke-linecap="round"/>`;
+const sameEdge = (u, v, x, y) => (u === x && v === y) || (u === y && v === x);
+let k = 0, showOpt = false;
+
+function draw() {
+  const f = frames[k];
+  let h = '';
+  if (showOpt) OPT.forEach((v, i) => h += line(v, OPT[(i + 1) % n], '#888780', 2, '2 4'));
+  const m = f.move;
+  f.tour.forEach((v, i) => {
+    const w = f.tour[(i + 1) % n];
+    if (m && f.before && (sameEdge(v, w, m.a, m.b) || sameEdge(v, w, m.c, m.d))) h += line(v, w, '#e24b4a', 2.5, '6 4');
+    else if (m && !f.before && (sameEdge(v, w, m.a, m.c) || sameEdge(v, w, m.b, m.d))) h += line(v, w, '#1d9e75', 3);
+    else h += line(v, w, '#7f77dd', 2);
+  });
+  if (m && f.before) { h += line(m.a, m.c, '#1d9e75', 2, '3 3'); h += line(m.b, m.d, '#1d9e75', 2, '3 3'); }
+  const mark = m ? [m.a, m.b, m.c, m.d] : [];
+  P.forEach((p, i) => {
+    const cls = mark.includes(i) ? 'amber' : i === 0 ? 'coral' : 'purple';
+    h += `<g class="node ${cls}"><circle cx="${X(p[0])}" cy="${Y(p[1])}" r="11"/><text x="${X(p[0])}" y="${Y(p[1])}" text-anchor="middle" dominant-baseline="central" style="font-size:11px;font-weight:500">${i}</text></g>`;
+  });
+  document.getElementById('svg').innerHTML = h;
+  const L = len(f.tour);
+  document.getElementById('step').textContent = frames.slice(0, k + 1).filter(x => x.move && !x.before).length;
+  document.getElementById('checks').textContent = f.checks;
+  document.getElementById('len').textContent = L.toFixed(0);
+  document.getElementById('ex').textContent = `+${((L / optLen - 1) * 100).toFixed(1)}%`;
+  const cap = document.getElementById('cap');
+  if (k === 0) cap.textContent = `출발점: 최근접 이웃 경로 (길이 ${L.toFixed(0)}). 이제 서로 이웃하지 않는 간선 쌍 ${n * (n - 3) / 2}개를 차례로 검사합니다.`;
+  else if (f.done) cap.textContent = `${passes}번째 바퀴에서 쌍 ${n * (n - 3) / 2}개를 모두 검사했지만 짧아지는 교체가 없어 멈췄습니다 (2-opt 지역 최적). 최적과의 남은 차이는 점 11의 위치입니다. 점 하나를 떼어 다른 자리에 끼우는 이동은 간선 세 개를 바꿔야 해서 2-opt로는 한 번에 할 수 없습니다 (Or-opt·3-opt의 영역).`;
+  else if (f.before) cap.textContent = `${f.pass}번째 바퀴, 검사 ${f.checks}번째 쌍: (${m.a},${m.b})와 (${m.c},${m.d})를 빼고 (${m.a},${m.c}), (${m.b},${m.d})를 넣으면 ${(-m.delta).toFixed(0)}만큼 짧아집니다.`;
+  else cap.textContent = `교체 완료: ${m.b}부터 ${m.c}까지 구간의 방향이 뒤집혔습니다. 바퀴를 처음부터 다시 하지 않고, 남은 쌍을 이어서 검사합니다.`;
+}
+document.getElementById('next').onclick = () => { if (k < frames.length - 1) { k++; draw(); } };
+document.getElementById('prev').onclick = () => { if (k > 0) { k--; draw(); } };
+document.getElementById('all').onclick = () => { k = frames.length - 1; draw(); };
+document.getElementById('reset').onclick = () => { k = 0; draw(); };
+document.getElementById('opt').onclick = e => { showOpt = !showOpt; e.target.textContent = showOpt ? '최적 경로 숨기기' : '최적 경로 겹쳐 보기'; draw(); };
+draw();
+</script>
+</body>
+</html>

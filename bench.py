@@ -2,11 +2,12 @@
 
     py bench.py smoke      작은 설정으로 러너가 동작하는지 확인 → results/smoke.csv
     py bench.py small      실험 A: n = 8~14, Held-Karp 최적값 대비 → results/small.csv
-    py bench.py large      실험 B: n = 100~2000, MST 대비 비율·격자 초과율 → results/large.csv (약 10분)
+    py bench.py large      실험 B: n = 100~2000, MST 대비 비율·격자 초과율 → results/large.csv (약 6~10분)
+    py bench.py tsplib     실험 C: TSPLIB 5개, 알려진 최적값 대비 → results/tsplib.csv
 
 실험마다 원자료(<name>.csv)와 요약(<name>_summary.csv)을 저장한다.
 n이 3개 이상인 실험은 log-log 기울기(<name>_slopes.csv)도 저장한다.
-실험 C·D는 이후 이슈에서 이 스크립트에 추가한다.
+실험 D는 이후 이슈에서 이 스크립트에 추가한다.
 모든 실험은 results/environment.json에 측정 환경을 함께 남긴다.
 """
 
@@ -17,10 +18,11 @@ import sys
 from pathlib import Path
 
 from tsp.bench import measure_many, write_csv, write_environment
-from tsp.common import tour_length
+from tsp.common import tour_length, tsplib_distance
 from tsp.held_karp import held_karp
 from tsp.instances import grid_optimum, make_instance
 from tsp.mst_approx import mst_length
+from tsp.tsplib import INSTANCES as TSPLIB_INSTANCES, load_tsplib
 
 RESULTS = Path(__file__).resolve().parent / "results"
 
@@ -136,16 +138,16 @@ def _slope(xs, ys) -> float:
 SLOPE_FIELDS = ["kind", "algorithm", "n_min", "n_max", "points", "time_slope", "calls_slope"]
 
 
-def save(rows: list[dict], name: str, verbose: bool = True) -> Path:
+def save(rows: list[dict], name: str, verbose: bool = True, slopes: bool = True) -> Path:
     """results/<name>.csv(원자료)와 results/<name>_summary.csv(요약)를 저장한다.
 
-    n이 3개 이상이면 log-log 기울기도 results/<name>_slopes.csv로 저장한다.
+    slopes가 참이고 n이 3개 이상이면 log-log 기울기도 results/<name>_slopes.csv로 저장한다.
     """
     path = RESULTS / f"{name}.csv"
     write_csv(rows, path, FIELDS)
     summary = summarize(rows)
     write_csv(summary, RESULTS / f"{name}_summary.csv", SUMMARY_FIELDS)
-    slopes = loglog_slopes(summary)
+    slopes = loglog_slopes(summary) if slopes else []
     if slopes:
         write_csv(slopes, RESULTS / f"{name}_slopes.csv", SLOPE_FIELDS)
     if verbose:
@@ -188,8 +190,40 @@ def large(reps: int) -> Path:
     return save(large_rows(reps), "large")
 
 
+def tsplib_rows(reps: int, names=TSPLIB_INSTANCES, verbose: bool = True) -> list[dict]:
+    """실험 C의 원자료 행. TSPLIB 인스턴스마다 세 방식을 재고 알려진 최적값 대비 초과율을 낸다.
+
+    TSPLIB 문제는 EUC_2D 거리(간선마다 반올림한 정수)로 정의되고 공식 최적값도 이 거리로 계산된 값이다.
+    그래서 알고리즘이 쓰는 거리와 경로 길이를 재는 거리 모두 tsplib_distance로 한다 (명세 3장).
+    instance 열에는 인스턴스 이름을 넣는다.
+    """
+    rows = []
+    for name in names:
+        inst = load_tsplib(name)
+        points, n = inst.points, len(inst.points)
+        results = measure_many(APPROX, points, reps=reps, dist=tsplib_distance)
+        mst = mst_length(points, tsplib_distance)
+        for algo, r in results.items():
+            row = {"experiment": "tsplib", "kind": "tsplib", "n": n, "instance": name,
+                   "algorithm": algo, "optimum": inst.optimum, "mst_length": mst,
+                   **{k: v for k, v in r.items() if k != "tour"},
+                   "excess_pct": (r["length"] / inst.optimum - 1) * 100,
+                   "mst_ratio": r["length"] / mst}
+            rows.append(row)
+            if verbose:
+                print(f"tsplib {name:9s} n={n:4d} {algo:8s} length={r['length']:7d} "
+                      f"opt={inst.optimum:6d} excess={row['excess_pct']:6.2f}% "
+                      f"calls={r['dist_calls']:>9,} time={r['time_ms']:8.2f} ms", flush=True)
+    return rows
+
+
+def tsplib(reps: int) -> Path:
+    """실험 C: TSPLIB 5개 인스턴스에서 알려진 최적값 대비 초과율."""
+    return save(tsplib_rows(reps), "tsplib", slopes=False)
+
+
 # 이름 → (함수, 기본 반복 횟수)
-EXPERIMENTS = {"smoke": (smoke, 3), "small": (small, 5), "large": (large, 5)}
+EXPERIMENTS = {"smoke": (smoke, 3), "small": (small, 5), "large": (large, 5), "tsplib": (tsplib, 5)}
 
 
 def main(argv=None) -> int:

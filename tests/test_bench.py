@@ -93,6 +93,25 @@ class LargeExperimentTest(unittest.TestCase):
         self.assertAlmostEqual(slopes[0]["calls_slope"], 2.0, delta=0.01)
 
 
+class TsplibExperimentTest(unittest.TestCase):
+    def test_tsplib_rows(self):
+        import bench
+        rows = bench.tsplib_rows(reps=1, names=("eil51", "berlin52"), verbose=False)
+        self.assertEqual(len(rows), 2 * 3)
+        for row in rows:
+            inst = load_tsplib(row["instance"])
+            self.assertEqual(row["kind"], "tsplib")
+            self.assertEqual(row["n"], len(inst.points))
+            self.assertEqual(row["optimum"], inst.optimum)
+            self.assertIsInstance(row["length"], int)  # 반올림 거리로 잰 길이
+            self.assertGreaterEqual(row["length"], inst.optimum)
+            self.assertAlmostEqual(row["excess_pct"], (row["length"] / inst.optimum - 1) * 100)
+            self.assertEqual(row["dist_calls"] >= row["n"] * (row["n"] - 1) // 2, True)
+        by_algo = {(r["instance"], r["algorithm"]): r["length"] for r in rows}
+        for name in ("eil51", "berlin52"):
+            self.assertLessEqual(by_algo[(name, "two_opt")], by_algo[(name, "nn")])
+
+
 class InterleaveTest(unittest.TestCase):
     def test_timed_runs_are_interleaved_and_rotated(self):
         from unittest import mock

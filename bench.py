@@ -170,7 +170,8 @@ def small(reps: int, sizes=(8, 10, 12, 14), instances: int = 10, verbose: bool =
     """실험 A: 작은 n에서 세 근사 해법을 Held-Karp 최적값과 비교한다 (Held-Karp 시간도 함께 잰다)."""
     rows = run_cases("small", ("uniform", "clustered", "grid"), sizes, instances, reps,
                      algorithms=("held_karp",) + APPROX, verbose=verbose)
-    return save(rows, "small", verbose)
+    # n = 8~14 시간은 0.01~0.1 ms라 잡음이 커서 기울기는 내지 않는다 (Held-Karp 증가는 그래프로 본다)
+    return save(rows, "small", verbose, slopes=False)
 
 
 LARGE_SIZES = (100, 200, 500, 1000, 2000)
